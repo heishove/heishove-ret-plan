@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Retirement Planner</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .input-group { @apply mb-4; }
+        label { @apply block text-sm font-medium text-gray-700 mb-1; }
+        input { @apply w-full p-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500; }
+        a:link {
+            color: blue;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 p-4 md:p-8">
+    <div class="max-w-6xl mx-auto bg-white p-6 rounded-xl shadow-lg">
+        <h1 class="text-3xl font-bold text-blue-800 mb-6">Retirement Planner</h1>
+       
+        <div class="grid grid-cols-2 md:grid-cols-3 gap-8">
+            <div class="space-y-6">
+                <section>
+                    <h2 class="text-xl font-semibold mb-3 border-b pb-1">Dates</h2>
+                    <div class="input-group">
+                        <label>Birth Date:</label>
+                        <input type="date" id="birthDate" value="1967-11-28">
+                    </div>
+                    <div>
+                        Full Retirement Age (FRA): 67 (born 1960+)
+                    </div>
+                    <div class="input-group">
+                        <label id="retireAgeLabel">Retirement Age: 63</label>
+                        <input type="range" id="retireAge" min="62" max="70" value="63" class="h-2 bg-blue-200 rounded-lg appearance-none cursor-pointer">
+                    </div>
+                    <p class="text-xs text-gray-500 mt-2 italic">Note: We assume you retire starting the month after birthday. Although you can start taking withdrawals without penalty at 59.5, you can only take SS benefits at 62+ (at reduced PIA). </p>
+                </section>
+
+                <section>
+                    <h2 class="text-xl font-semibold mb-3 border-b pb-1">Wages & Benefits</h2>
+                    <p class="text-xs text-gray-500 mt-2 italic">Log into <a href="https://www.ssa.gov/myaccount/">www.ssa.gov</a> and go to <a href="https://secure.ssa.gov/ec2/eligibility-earnings-ui/earnings-record">earnings-record</a> to get your Average Future Salary and Your Full Benefit at FRA.<p />
+                    <div class="input-group">
+                        <label>Expected Salary ($/yr):</label>
+                        <input type="number" id="yearlySalary" value="151000">
+                    </div>
+                    <div class="input-group">
+                        <label>Benefit @ FRA ($/mo):</label>
+                        <input type="number" id="fullBenefit" value="4008">
+                    </div>
+                    <div class="input-group">
+                        <label>Contribution ($/yr):</label>
+                        <input type="number" id="contrib" value="23500">
+                    </div>
+                    <p class="text-xs text-gray-500 mt-2 italic">Note: AIME/PIA are calculated from 35 years of wages; easier to get from SSA, and simpler, than to have you input that from box 3 of all those W2 forms. This also assumes you're close enough to retirement age that we can just use a single expected salary instead of modeling one with growth.</p>
+                </section>
+
+                <section>
+                    <h2 class="text-xl font-semibold mb-3 border-b pb-1">Assets (401k,IRA,..) & Growth</h2>
+                    <div class="input-group">
+                        <label>Initial Balance ($):</label>
+                        <input type="number" id="assets0" value="723626">
+                    </div>
+                    <div class="input-group">
+                        <label>Annual Return (%):</label>
+                        <input type="number" id="growthRate" value="6" step="0.1">
+                    </div>
+                    <div>
+                        <label>CostOfLivingAdj (%):</label>
+                        <input type="number" id="cola" value="2.8" step="0.1">
+                    </div>
+                </section>
+
+                <section>
+                    <h2 class="text-xl font-semibold mb-3 border-b pb-1">Retirement Income</h2>
+                    <div class="input-group">
+                        <label id="targetIncomeLabel">Target Income ($/mo): 5000</label>
+                        <input type="range" id="targetIncome" min="1000" max="15000" step="100" value="5000" class="h-2 bg-blue-200 rounded-lg appearance-none cursor-pointer">
+                    </div>
+                </section>
+            </div>
+
+            <div class="md:col-span-2">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+                    <div class="p-4 bg-green-100 rounded-lg">
+                        <span class="text-sm text-green-800 uppercase font-bold text-xs">Monthly Social Security Benefit (PIA)</span>
+                        <div id="piaDisplay" class="text-2xl font-mono font-bold text-green-900">$0.00</div>
+                    </div>
+                    <div class="p-4 bg-purple-100 rounded-lg">
+                        <span class="text-sm text-purple-800 uppercase font-bold text-xs">Monthly Asset Withdrawal</span>
+                        <div id="drawDisplay" class="text-2xl font-mono font-bold text-purple-900">$0.00</div>
+                    </div>
+                </div>
+
+                <div class="relative h-[400px] w-full">
+                    <canvas id="balanceChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let myChart;
+
+        function updateModel() {
+            const birthDate = new Date(document.getElementById('birthDate').value);
+            const yearlySalary = parseFloat(document.getElementById('yearlySalary').value);
+            const fullBenefit = parseFloat(document.getElementById('fullBenefit').value);
+            const assets0 = parseFloat(document.getElementById('assets0').value);
+            const monthlyGrowth = Math.pow(1 + parseFloat(document.getElementById('growthRate').value) / 100, 1/12);
+            const retireAge = parseInt(document.getElementById('retireAge').value);
+            let targetIncome = parseFloat(document.getElementById('targetIncome').value);
+            const colaYearly = 1 + parseFloat(document.getElementById('cola').value) / 100;
+            const monthlyContrib = parseFloat(document.getElementById('contrib').value) / 12;
+
+            // Update Labels
+            document.getElementById('retireAgeLabel').innerText = `Retirement Age: ${retireAge}`;
+            document.getElementById('targetIncomeLabel').innerText = `Target Income ($/mo): ${targetIncome.toLocaleString()}`;
+
+            let pia = -1; // Primary Insurance Amount
+            // PIA is 70% at 62, 75% at 63, 80% at 64, 86.6667% at 65, 93.3333% at 66, 100% at 67, 108% at 68, 116% at 69, 124% at 70  (see https://www.ssa.gov/oact/ProgData/ar_drc.html)
+            switch (retireAge) {
+                case 62: pia = .70 * fullBenefit; break;
+                case 63: pia = .75 * fullBenefit; break;
+                case 64: pia = .80 * fullBenefit; break;
+                case 65: pia = .866667 * fullBenefit; break;
+                case 66: pia = .933333 * fullBenefit; break;
+                default: pia = (1 + Math.min((retireAge - 67) * .08, .24)) * fullBenefit; break;
+            }
+            const withdrawal = targetIncome - pia;
+            document.getElementById('drawDisplay').innerText = `$${withdrawal.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
+            document.getElementById('piaDisplay').innerText = `$${pia.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
+
+            // Projection Logic
+            const xlabels = [];
+            const assets = [];
+            const benefits = [];
+            const income = [];
+            let currentBalance = assets0;
+            let yearsBenefit = 0;
+            let yearsDraw = 0;
+            const today = new Date();
+            let year = today.getFullYear(); // e.g. 2026
+            let month = today.getMonth(); // 0-11
+
+            let age = year - birthDate.getFullYear(); // age we'll be this year in the month after birth month (if we've passed it, that+1 otherwise)
+            if (today.getMonth() <= birthDate.getMonth()) {
+                --age; // haven't passed birth month yet
+            }
+
+            for (--month; ;) {
+                month += 1;
+                if (month >= 12) { // completed some year of accounting
+                    xlabels.push(age);
+                    assets.push(currentBalance);
+                    benefits.push(yearsBenefit);
+                    income.push(yearsBenefit + yearsDraw);
+                    if (age >= retireAge) { // we're moving into a new year from when values specified
+                        pia *= colaYearly;
+                        targetIncome *= colaYearly; // it's a monthly amount targeted, but only updated once a year
+                    }
+                    ++age;
+                    if (age > 90) {
+                        break;
+                    }
+                    month = 0;
+                    yearsBenefit = 0;
+                    yearsDraw = 0;
+                }
+                let benefit = 0;
+                let draw = 0;
+                if (age >= retireAge) {
+                    benefit = pia;
+                    draw = targetIncome - benefit;
+                }
+                if (draw > currentBalance) {
+                    draw = currentBalance;
+                }
+                yearsBenefit += benefit;
+                yearsDraw += draw;
+                currentBalance -= draw;
+                currentBalance *= monthlyGrowth;
+                if (age < retireAge) {
+                    currentBalance += monthlyContrib;
+                }
+            }
+
+            renderChart(xlabels, assets, benefits, income);
+        }
+
+        function renderChart(xlabels, assets, benefits, income) {
+            const ctx = document.getElementById('balanceChart').getContext('2d');
+           
+            if (myChart) {
+                myChart.destroy();
+            }
+
+            myChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: xlabels,
+                    datasets: [
+                        // Dark Green = Benefits
+                        {
+                            label: 'Benefits ($)',
+                            data: benefits,
+                            borderColor: 'rgba(0,100,0,1)',
+                            backgroundColor: 'rgba(0,100,0,0.8)',
+                            fill: true,
+                            yAxisID: 'yr',
+//                            stack: 'income',
+                            tension: 0.1
+                        },
+
+                        // Amber = Withdrawals (summed with Benefits as income)
+                        {
+                            label: 'Benefits+Withdrawals ($)',
+                            data: income,
+                            borderColor: 'rgba(255,191,0,1)',
+                            backgroundColor: 'rgba(255,191,0,0.8)',
+                            fill: '-1',
+                            yAxisID: 'yr',
+//                            stack: 'income',
+                            tension: 0.1
+                        },
+
+                        // Blue = Remaining Portfolio
+                        {
+                            label: 'Assets ($)',
+                            data: assets,
+                            borderColor: '#2563eb',
+                            backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                            fill: '-1',
+                            yAxisID: 'y',
+                            tension: 0.1
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            position: 'left',
+                            beginAtZero: true,
+                            ticks: { callback: value => '$' + value.toLocaleString() }
+                        },
+                        yr: {
+                            position: 'right',
+//                            stacked: true,
+                            beginAtZero: true,
+                            min: 0,
+                            max: 500000,
+                            grid: {
+                                drawOnChartArea: false   // prevents double gridlines
+                            },
+                            ticks: { callback: value => '$' + value.toLocaleString() }
+                        },
+                        x: { title: { display: true, text: 'Age' } }
+                    }
+                }
+            });
+        }
+
+        // Listen for all changes
+        document.querySelectorAll('input').forEach(input => {
+            input.addEventListener('input', updateModel);
+        });
+
+        // Initial run
+        updateModel();
+    </script>
+</body>
+</html>
